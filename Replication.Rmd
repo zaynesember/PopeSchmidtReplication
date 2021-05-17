@@ -20,6 +20,12 @@ library(grid)
 library(gridExtra)
 library(corrplot)
 library(Amelia)
+library(ggeffects)
+library(modelsummary)
+library(AER)
+library(sampleSelection)
+library(stargazer)
+library(kableExtra)
 ```
 
 ```{r}
@@ -40,6 +46,7 @@ ggplot(aes(x=index1),data=dataset) +
   scale_y_continuous(breaks = 1:10) +
   theme_bw()
 ```
+
 ```{r, echo=FALSE}
 vote1 <- ggplot(aes(x=vote2),data=dataset) +
   geom_histogram(binwidth = 0.5, col="darkgray", fill="coral4") +
@@ -129,11 +136,10 @@ While there is no missingness visible in the replication dataset, the authors do
 
 
 ```{r}
-model_poisson <- glm(index1 ~ sons + dtrs + ageco + agecosq + revoffco
-                     + nslave + dist2 + vsecr + vbank + ddebt + pols + lawyer,
-                     data=dataset, family = poisson(link = "log"))
-
-# Code taken from https://stats.stackexchange.com/questions/89999/how-to-replicate-statas-robust-binomial-glm-for-proportion-data-in-r
+# Code taken from:
+# https://stats.stackexchange.com/questions/89999/
+# how-to-replicate-statas-robust-binomial-glm-for-proportion-data-in-r
+# Creates robust standard errors for glm models
 robustify <- function(model){
   cov.m1 <- vcovHC(model, type = "HC0")
   
@@ -153,49 +159,175 @@ robustify <- function(model){
   return(retVal)
 }
 
+# Because R and STATA don't get along, this function takes a 
+# sampleSelection::probit model with robust SEs and formats the output to be
+# presented in a neat table since stargazer and modelsummary don't support
+# the model output by sampleSelection
+fmt_col <- function(model, DV){
+  ests <- rep(NA, nrow(model))
+  errs <- rep(NA, nrow(model))
+  
+  for(i in 1:nrow(model)){
+    sig <- ""
+    if(model$p[i] < 0.01){sig <- '***'}
+    else if(model$p[i] < 0.05){sig <- '**'}
+    else if(model$p[i] < 0.1){sig <- '*'}
+    
+    ests[i] <- paste(model$estimate[i],sig, sep="")
+    errs[i] <- paste("(",model$stderr[i],")",sep="")
+  }
+  return(c(rbind(ests,errs),toString(length(DV))))
+}
 
-model_poisson_robust <- robustify(model_poisson)
 ```
 
 ```{r, warning=FALSE}
-model_logit1 <- robustify(glm(vote2 ~ sons + dtrs + ageco + agecosq + 
-                                revoffco + nslave + dist2 + vsecr + vbank + 
-                                ddebt + pols + lawyer,
-                    data=dataset, family=binomial(link="logit")))
 
-model_logit2 <- robustify(glm(anti5 ~ sons + dtrs + ageco + agecosq + 
-                                revoffco + nslave + dist2 + vsecr + vbank + 
-                                ddebt + pols + lawyer,
-                    data=dataset, family=binomial(link="logit")))
+model_poisson <- glm(index1 ~ sons + dtrs + ageco + agecosq + revoffco
+                     + nslave + dist2 + vsecr + vbank + ddebt + pols + lawyer,
+                     data=dataset, family = poisson(link = "log"))
 
-model_logit3 <- robustify(glm(anti6 ~ sons + dtrs + ageco + agecosq + 
-                                revoffco + nslave + dist2 + vsecr + vbank + 
-                                ddebt + pols + lawyer,
-                    data=dataset, family=binomial(link="logit")))
+# Generate the model with robust SEs and get it into a workable type
+model_poisson <- as.data.frame(matrix(round(robustify(glm(index1 ~ sons + dtrs + ageco + agecosq + revoffco + nslave + dist2 + vsecr + vbank + ddebt + pols + lawyer, data=dataset,
+                     family = poisson(link = "log")))[,1:4],4), ncol=4))
+colnames(model_poisson) <- c("estimate", "stderr", "t", "p") # TODO: WHY IS THIS BUGGY?
 
-model_logit4 <- robustify(glm(anti7 ~ sons + dtrs + ageco + agecosq + 
-                                revoffco + nslave + dist2 + vsecr + vbank + 
-                                pols + lawyer,
-                    data=dataset, family=binomial(link="logit")))
+# Format the model output so it's ready for the table
+pn <- fmt_col(model_poisson, dataset$index1)
 
-model_logit5 <- robustify(glm(vote8 ~ sons + dtrs + ageco + agecosq + 
-                                revoffco + nslave + dist2 + vsecr + vbank + 
-                                ddebt + pols + lawyer,
-                    data=dataset, family=binomial(link="logit")))
+# model_probit1 <- glm(vote2 ~ sons + dtrs + ageco + agecosq +
+#                     revoffco + nslave + dist2 + vsecr + vbank +
+#                     ddebt + pols + lawyer,
+#                     data=dataset, family=binomial(link="probit"))
 
-model_logit6 <- robustify(glm(vote9 ~ sons + dtrs + ageco + agecosq + 
-                                revoffco + nslave + dist2 + vsecr + 
-                                ddebt + pols + lawyer,
-                    data=dataset, family=binomial(link="logit")))
+model_probit1 <- as.data.frame(matrix(round(coeftest(probit(vote2 ~ sons + dtrs + ageco + agecosq + 
+                    revoffco + nslave + dist2 + vsecr + vbank + 
+                    ddebt + pols + lawyer,
+                    data=dataset), vcovCL),4), ncol=4))
+colnames(model_probit1) <- c("estimate", "stderr", "t", "p")
 
-model_logit7 <- robustify(glm(anti14 ~ sons + dtrs + ageco + agecosq + 
-                                revoffco + nslave + dist2 + vsecr + vbank + 
-                                ddebt + pols + lawyer,
-                    data=dataset, family=binomial(link="logit")))
+p1 <- fmt_col(model_probit1, dataset$vote2)
 
-model_logit8 <- robustify(glm(vote15 ~ sons + dtrs + ageco + agecosq + 
-                                revoffco + nslave + dist2 + vsecr + vbank + 
-                                ddebt + pols + lawyer,
-                    data=dataset, family=binomial(link="logit")))
+# model_probit2 <- glm(anti5 ~ sons + dtrs + ageco + agecosq +
+#                     revoffco + nslave + dist2 + vsecr + vbank +
+#                     ddebt + pols + lawyer,
+#                     data=dataset, family=binomial(link="probit"))
+
+model_probit2 <- as.data.frame(matrix(round(coeftest(probit(anti5 ~ sons + dtrs + ageco + agecosq + 
+                    revoffco + nslave + dist2 + vsecr + vbank + 
+                    ddebt + pols + lawyer,
+                    data=dataset), vcovCL),4), ncol=4))
+colnames(model_probit2) <- c("estimate", "stderr", "t", "p")
+
+p2 <- fmt_col(model_probit2, dataset$anti5)
+
+# model_probit3 <- glm(anti6 ~ sons + dtrs + ageco + agecosq + 
+#                     revoffco + nslave + dist2 + vsecr + vbank + 
+#                     ddebt + pols + lawyer,
+#                     data=dataset, family=binomial(link="probit"))
+
+model_probit3 <- as.data.frame(matrix(round(coeftest(probit(anti6 ~ sons + dtrs + ageco + agecosq + 
+                    revoffco + nslave + dist2 + vsecr + vbank + 
+                    ddebt + pols + lawyer,
+                    data=dataset), vcovCL),4), ncol=4))
+colnames(model_probit3) <- c("estimate", "stderr", "t", "p")
+
+p3 <- fmt_col(model_probit3, dataset$anti6)
+
+# model_probit4 <- glm(anti7 ~ sons + dtrs + ageco + agecosq +
+#                     revoffco + nslave + dist2 + vsecr + vbank +
+#                     pols + lawyer,
+#                     data=dataset, family=binomial(link="probit"))
+
+model_probit4 <- as.data.frame(matrix(round(coeftest(probit(anti7 ~ sons + dtrs + ageco + agecosq + 
+                    revoffco + nslave + dist2 + vsecr + vbank +
+                    pols + lawyer,
+                    data=dataset), vcovCL),4), ncol=4))
+colnames(model_probit4) <- c("estimate", "stderr", "t", "p")
+
+p4 <- fmt_col(model_probit4, dataset$anti7)
+p4 <- append(p4, c("-","-"),20) # TODO: WHY DOESN'T THIS MATCH?
+
+# model_probit5 <- glm(vote8 ~ sons + dtrs + ageco + agecosq + 
+#                     revoffco + nslave + dist2 + vsecr + vbank + 
+#                     ddebt + pols + lawyer,
+#                     data=dataset, family=binomial(link="probit"))
+
+model_probit5 <- as.data.frame(matrix(round(coeftest(probit(vote8 ~ sons + dtrs + ageco + agecosq + 
+                    revoffco + nslave + dist2 + vsecr + vbank + 
+                    ddebt + pols + lawyer,
+                    data=dataset), vcovCL),4), ncol=4))
+colnames(model_probit5) <- c("estimate", "stderr", "t", "p")
+
+p5 <- fmt_col(model_probit5, dataset$vote8)
+
+# model_probit6 <- glm(vote9 ~ sons + dtrs + ageco + agecosq + 
+#                     revoffco + nslave + dist2 + vsecr + 
+#                     ddebt + pols + lawyer,
+#                     data=dataset, family=binomial(link="probit"))
+
+model_probit6 <- as.data.frame(matrix(round(coeftest(probit(vote9 ~ sons + dtrs + ageco + agecosq + 
+                    revoffco + nslave + dist2 + vsecr + 
+                    ddebt + pols + lawyer,
+                    data=dataset), vcovCL),4), ncol=4))
+colnames(model_probit6) <- c("estimate", "stderr", "t", "p")
+
+p6 <- fmt_col(model_probit6, dataset$vote9)
+p6 <- append(p6, c("-","-"),18) # TODO: WHY DOESN'T THIS MATCH?
+
+# model_probit7 <- glm(anti14 ~ sons + dtrs + ageco + agecosq + 
+#                     revoffco + nslave + dist2 + vsecr + vbank + 
+#                     ddebt + pols + lawyer,
+#                     data=dataset, family=binomial(link="probit"))
+
+model_probit7 <- as.data.frame(matrix(round(coeftest(probit(anti14 ~ sons + dtrs + ageco + agecosq + 
+                    revoffco + nslave + dist2 + vsecr + vbank + 
+                    ddebt + pols + lawyer,
+                    data=dataset), vcovCL),4), ncol=4))
+colnames(model_probit7) <- c("estimate", "stderr", "t", "p")
+
+p7 <- fmt_col(model_probit7, dataset$anti14)
+
+# model_probit8 <- glm(vote15 ~ sons + dtrs + ageco + agecosq + 
+#                     revoffco + nslave + dist2 + vsecr + vbank + 
+#                     ddebt + pols + lawyer,
+#                     data=dataset, family=binomial(link="probit"))
+
+model_probit8 <- as.data.frame(matrix(round(coeftest(probit(vote15 ~ sons + dtrs + ageco + agecosq + 
+                    revoffco + nslave + dist2 + vsecr + vbank + 
+                    ddebt + pols + lawyer,
+                    data=dataset), vcovCL),4), ncol=4))
+colnames(model_probit8) <- c("estimate", "stderr", "t", "p")
+
+p8 <- fmt_col(model_probit8, dataset$vote15)
+
+# Column names for Table 2
+cnames=c("Preferred Index","National Veto","Debtor Legislators","Cong. Quorum.",
+           "National Exports","Militia Control","State Credit",
+           "Navigation Acts","Military Responsibility")
+
+# Row names for Table 2 (with ugly hack to get spacing right)
+rnames=c("Constant","","Number of sons"," ","Number of daughters","  ","Age",
+         "   ","Age squared","    ",
+         "Revolutionary war officer","     ","Logged number of slaves","      ", 
+         "Distance to navigable coastline","       ",
+         "Public securities (1000s, 1787 dollars)","        ",
+         "Private securities (1000s, 1787 dollars)","         ",
+         "Debtor (dummy)","          ", "Politician","           ", "Lawyer",
+         "             ", "Observations") 
+
+# Assemble the dataframe with the model outputs and assign names
+table2 <- as.data.frame(cbind(pn,p1, p2, p3, p4, p5, p6, p7, p8))
+colnames(table2) <- cnames
+rownames(table2) <- rnames
 ```
+
+```{r}
+# Generate Table 2
+kable(table2, booktabs=T) %>% 
+  kable_styling(latex_options="scale_down") %>% 
+  landscape() 
+```
+
+
 
