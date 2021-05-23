@@ -1,6 +1,6 @@
 ***Father Founders***
 
-* Use the file: "founding fathers dataset-corrections-attendance-replication.dta"
+use "founding fathers dataset-corrections-attendance-replication.dta"
 
 *Figure 1
 *scatter total children on proportion (labels added manually)

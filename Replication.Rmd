@@ -1,12 +1,19 @@
 ---
-title: "Replication Project"
-subtitle: "POLI 271: Advanced Statistical Applications"
-author: "Zayne Sember"
-date: "4/27/2021"
+title: | 
+  | Replication of Father Founders: 
+  | Did Child Gender Affect Voting at the Constitutional Convention?
+subtitle: |
+  | Prepared for POLI 271: Advanced Statistical Applications
+author: |
+  | Zayne Sember
+  | Department of Political Science
+  | University of California, San Diego
+abstract: FINISH THIS
 output: pdf_document
 header-includes:
    - \usepackage[default]{sourcesanspro}
    - \usepackage[T1]{fontenc}
+   - \usepackage[utf8]{inputenc}
 mainfont: SourceSansPro
 ---
 
@@ -26,28 +33,209 @@ library(AER)
 library(sampleSelection)
 library(stargazer)
 library(kableExtra)
+library(vcd)
+library(MASS)
+library(COUNT)
+library(boot)
+library(Amelia)
 ```
 
-```{r}
+```{r, message=FALSE}
+# Get the replication dataset
 dataset <- read_dta("Original Dataset/founding fathers dataset-corrections-attendance-replication.dta")
 
-dataset_select <- dataset %>% select(index1, sons, dtrs, age, revoffco, 
-                       nslave, dist1, vsecr, vbank, ddebt, pols, lawyer) %>% na.omit()
+# Get the ICPSR delegate vote dataset
+ICPSR_data <- read_delim("ICPSR Dataset/ICPSR24544-Data.tsv", 
+                         "\t", escape_double = FALSE, trim_ws = TRUE) %>% 
+              dplyr::select(firstname, lastname, state, state_num,
+                            dv30, dv230, dv268, dv336, dv345,
+                            dv387, dv399, dv415)
+
+# Recode missing data
+ICPSR_data[,5:12] <- na_if(ICPSR_data[,5:12], 9)
+ICPSR_data[,5:12] <- na_if(ICPSR_data[,5:12], 0)
+ICPSR_data[,5:12][ICPSR_data[,5:12]==6] <- 0
+
+# Recode anti votes
+ICPSR_data[,c(6,7,8,11)][ICPSR_data[,c(6,7,8,11)]==1] <- 0
+ICPSR_data[,c(6,7,8,11)][ICPSR_data[,c(6,7,8,11)]==6] <- 1
+
+# Recode vote votes
+ICPSR_data[,c(5,9,10,12)][ICPSR_data[,c(5,9,10,12)]==6] <- 0
+
+colnames(ICPSR_data) <- c("firstname", "lastname", "state", "statenum", "vote2",
+                          "anti5", "anti6", "anti7", "vote8","vote9", "anti14",
+                          "vote15")
 ```
 
-# 1. A histogram of the dependent variable
-```{r, echo=FALSE}
-ggplot(aes(x=index1),data=dataset) +
-  geom_histogram(binwidth = 0.5, col="darkgray", fill="darkblue") +
-  xlab("Preferred Index") +
-  ylab("") +
-  ggtitle("Preferred Vote Index Distribution") +
-  scale_x_continuous(breaks = 1:8) +
-  scale_y_continuous(breaks = 1:10) +
-  theme_bw()
+## Introduction
+
+This article is a replication of Jeremy C. Pope and Soren J. Schmidt's 2021 piece "Father Founders: Did Child Gender Affect Voting at the Constitutional Convention?". In it, they test the hypothesis that the delegates with sons would tend to vote for a stronger national government because they foresaw such a government providing greater opportunities for their sons--for which they find evidence. I begin by replicating their primary model, a Poisson regression on a vote index, and their probit models of individual votes. I then examine the distributions of underlying data to ensure their models are appropriate. I then use the dataset from which their paper's dataset was derived to assess missingness and imputation in the authors' work. Finally, I assess the differences in standard errors for their model covariates comparing their `STATA` robust standard errors with `R`'s `glm()` standard errors and boostrapped standard errors.
+
+## Data
+
+The replication data used is provided by Pope and Schmidt (2021). I also employ Dougherty and Heckelman's (2009) dataset which provides delegate vote data without the imputation done in Pope and Schmidt's replication data. All code for this project is available at https://github.com/zaynesember/PopeSchmidtReplication.
+
+## Results
+
+### Model Replication
+
+Pope and Schmidt (2021) present 9 models of interest here, all of which share the same covariates (with the exception of two cases of multicollinearity). Their primary model is a Poisson regression on a "preferred index" of the eight votes evaluated in each of the additional probit models. The preferred index is calculated by summing the number of "yea" votes for expanding the national government and "nay" votes on limiting the government. Appendix A provides the table of all independent and dependent variables. Dependent variables labeled "vote" indicate a vote where a "yea" expands the government and those labeled "anti" denote a vote limiting government.
+
+Table 1 presents the replication of these eight models. All coefficients agree with those presented by Pope and Schmidt, although some standard errors on the probit models differ very slightly. This is due to the original analysis being done in `STATA` with the `robust` command; the similar robust errors reported here were calculated in `R` using the `sandwich` library's `vcovCL` function.
+
+**FIX SEPARATION ISSUES WITH PROBIT MODELS, THEN TALK ABOUT COEFFICIENTS**
+
+```{r, warning=FALSE}
+# Code taken from:
+# https://stats.stackexchange.com/questions/89999/
+# how-to-replicate-statas-robust-binomial-glm-for-proportion-data-in-r
+# Creates robust standard errors for glm models
+# NO LONGER NEEDED/USED
+robustify <- function(model){
+  cov.m1 <- vcovHC(model, type = "HC0")
+  
+  std.err <- sqrt(diag(cov.m1))
+  
+  q.val <- qnorm(0.975)
+  
+  retVal <- cbind(
+    Estimate = coef(model)
+    , "Robust SE" = std.err
+    , z = (coef(model)/std.err)
+    , "Pr(>|z|) "= 2 * pnorm(abs(coef(model)/std.err), 
+                             lower.tail = FALSE)
+    , LL = coef(model) - q.val  * std.err
+    , UL = coef(model) + q.val  * std.err
+  )
+  return(retVal)
+}
+
+# Because R and STATA don't get along, this function takes a 
+# sampleSelection::probit model with robust SEs and formats the output to be
+# presented in a neat table since stargazer and modelsummary don't support
+# the model output by sampleSelection
+# NO LONGER NEEDED/USED
+fmt_col <- function(model, DV){
+  ests <- rep(NA, nrow(model))
+  errs <- rep(NA, nrow(model))
+  
+  for(i in 1:nrow(model)){
+    sig <- ""
+    if(model$p[i] < 0.01){sig <- '***'}
+    else if(model$p[i] < 0.05){sig <- '**'}
+    else if(model$p[i] < 0.1){sig <- '*'}
+    
+    ests[i] <- paste(model$estimate[i],sig, sep="")
+    errs[i] <- paste("(",model$stderr[i],")",sep="")
+  }
+  return(c(rbind(ests,errs),toString(length(DV))))
+}
+
+# Replicate each model
+model_poisson_R <- glm(index1 ~ sons + dtrs + ageco + agecosq + revoffco
+                     + nslave + dist2 + vsecr + vbank + ddebt + pols + lawyer,
+                     data=dataset, family = poisson(link = "log"))
+
+model_probit1_R <- glm(vote2 ~ sons + dtrs + ageco + agecosq +
+                    revoffco + nslave + dist2 + vsecr + vbank +
+                    ddebt + pols + lawyer,
+                    data=dataset, family=binomial(link="probit"))
+
+model_probit2_R <- glm(anti5 ~ sons + dtrs + ageco + agecosq +
+                    revoffco + nslave + dist2 + vsecr + vbank +
+                    ddebt + pols + lawyer,
+                    data=dataset, family=binomial(link="probit"))
+
+model_probit3_R <- glm(anti6 ~ sons + dtrs + ageco + agecosq +
+                    revoffco + nslave + dist2 + vsecr + vbank +
+                    ddebt + pols + lawyer,
+                    data=dataset, family=binomial(link="probit"))
+
+model_probit4_R <- glm(anti7 ~ sons + dtrs + ageco + agecosq +
+                    revoffco + nslave + dist2 + vsecr + vbank +
+                    pols + lawyer,
+                    data=dataset, family=binomial(link="probit"))
+
+model_probit5_R <- glm(vote8 ~ sons + dtrs + ageco + agecosq +
+                    revoffco + nslave + dist2 + vsecr + vbank +
+                    ddebt + pols + lawyer,
+                    data=dataset, family=binomial(link="probit"))
+
+model_probit6_R <- glm(vote9 ~ sons + dtrs + ageco + agecosq +
+                    revoffco + nslave + dist2 + vsecr +
+                    ddebt + pols + lawyer,
+                    data=dataset, family=binomial(link="probit"))
+
+model_probit7_R <- glm(anti14 ~ sons + dtrs + ageco + agecosq +
+                    revoffco + nslave + dist2 + vsecr + vbank +
+                    ddebt + pols + lawyer,
+                    data=dataset, family=binomial(link="probit"))
+
+model_probit8_R <- glm(vote15 ~ sons + dtrs + ageco + agecosq +
+                    revoffco + nslave + dist2 + vsecr + vbank +
+                    ddebt + pols + lawyer,
+                    data=dataset, family=binomial(link="probit"))
+
+# Store models and their standard errors, output into a table
+model_list <- list('Preferred Index' = model_poisson_R, 
+                   'National Veto'=model_probit1_R, 
+                   'Debtor Legislators'=model_probit2_R,
+                   'Cong. Quorum'=model_probit3_R, 
+                   'National Exports'=model_probit4_R, 
+                   'Militia Control'=model_probit5_R,
+                   'State Credit'=model_probit6_R, 
+                   'Navigation Acts'=model_probit7_R, 
+                   'Military Responsibility'=model_probit8_R)
+
+SE_list <- list(coeftest(model_list[[1]], vcovCL)[,2],
+                coeftest(model_list[[2]], vcovCL)[,2],
+                coeftest(model_list[[3]], vcovCL)[,2],
+                coeftest(model_list[[4]], vcovCL)[,2],
+                coeftest(model_list[[5]], vcovCL)[,2],
+                coeftest(model_list[[6]], vcovCL)[,2],
+                coeftest(model_list[[7]], vcovCL)[,2],
+                coeftest(model_list[[8]], vcovCL)[,2],
+                coeftest(model_list[[9]], vcovCL)[,2]
+                )
+
+cnames <- c("Preferred Index","National Veto","Debtor Legislators",
+            "Cong. Quorum.","National Exports","Militia Control",
+            "State Credit","Navigation Acts","Military Responsibility")
+
+rnames <- c('(Intercept)'="Constant",
+            'sons'="Number of sons",
+            'dtrs'="Number of daughters",
+            'ageco'="Age",
+            'agecosq'="Age squared",
+            'revoffco'="Revolutionary war officer",
+            'nslave'="Logged number of slaves",
+            'dist2'="Distance to navigable coastline",
+            'vsecr'="Public securities (1000s, 1787 dollars)",
+            'vbank'="Private securities (1000s, 1787 dollars)",
+            'ddebt'="Debtor (dummy)",
+            'pols'="Politician",
+            'lawyer'="Lawyer")
+
+
+table2 <- modelsummary(model_list, statistic_override=SE_list, stars=T,
+                       coef_rename=rnames,
+                       notes=c("Blank coefficients omitted due to perfect
+                               multicollinearity.",
+                               "Preferred index model is a Poisson regression,
+                               all others are probit.
+                               Standard errors are robust."),
+                       title="Replication of Pope and Schmidt (2021) Table 2.",
+                       output="kableExtra")
+
+table2 %>% kable_styling(latex_options="scale_down") %>% landscape
+
 ```
 
-```{r, echo=FALSE}
+
+### Distribution of Data
+
+```{r, message=FALSE, warning=FALSE, eval=FALSE}
 vote1 <- ggplot(aes(x=vote2),data=dataset) +
   geom_histogram(binwidth = 0.5, col="darkgray", fill="coral4") +
   xlab("National Veto Vote") +
@@ -105,14 +293,288 @@ vote8 <- ggplot(aes(x=vote15),data=dataset) +
   theme_bw()
 
 grid.arrange(vote1, vote2, vote3, vote4, vote5, vote6, vote7, vote8,
-             ncol=3, nrow=3, top="Individual Vote Distributions")
+             ncol=3, nrow=3, top="Figure 1: Individual Vote Distributions", widths=c(0.25,0.25,0.25))
+```
+
+```{r, eval=FALSE}
+# Checking whether mean and variance of index1 are equal as Poisson regression
+# assumes
+m <- mean(dataset$index1)
+cat("Mean:",m,"\n")
+v <- var(dataset$index1)
+cat("Variance:",v,"\n")
+
+numstd <- abs(m-v)/sqrt(v)
+cat("Num. of stddev:",numstd)
+```
+
+```{r, warning=FALSE}
+# Function stolen from the vcd library. Provides just the data needed for a 
+# Poissonness plot without actually plotting it which lets you use ggplot or 
+# any graphics library you want!
+distplot_hacked <-
+    function(x, type = c("poisson", "binomial", "nbinomial"),
+             size = NULL, lambda = NULL, legend = TRUE, xlim = NULL, ylim = NULL,
+             conf_int = TRUE, conf_level = 0.95, main = NULL,
+             xlab = "Number of occurrences", ylab = "Distribution metameter",
+             gp = gpar(cex = 0.8), lwd=2, gp_conf_int = gpar(lty = 2),
+             name = "distplot", newpage = TRUE,
+             pop = TRUE, return_grob = FALSE, ...)
+{
+    if(is.vector(x)) {
+        x <- table(x)
+    }
+    if(is.table(x)) {
+        if(length(dim(x)) > 1) stop ("x must be a 1-way table")
+        freq <- as.vector(x)
+        count <- as.numeric(names(x))
+    } else {
+        if(!(!is.null(ncol(x)) && ncol(x) == 2))
+            stop("x must be a 2-column matrix or data.frame")
+        freq <- as.vector(x[,1])
+        count <- as.vector(x[,2])
+    }
+
+    myindex <- (1:length(freq))[freq > 0]
+    mycount <- count[myindex]
+    myfreq <- freq[myindex]
+
+    switch(match.arg(type),
+
+           "poisson" = {
+               par.ml <- suppressWarnings(goodfit(x, type = type)$par$lambda)
+
+               phi <- function(nk, k, N, size = NULL)
+                   ifelse(nk > 0, lgamma(k + 1) + log(nk/N), NA)
+               y <- phi(myfreq, mycount, sum(freq))
+               if(!is.null(lambda)) y <- y + lambda - mycount * log(lambda)
+               fm <- lm(y ~ mycount)
+               par.estim <- exp(coef(fm)[2])
+               names(par.estim) <- "lambda"
+               txt <- "exp(slope)"
+               if(!is.null(lambda)) {
+                   par.estim <- par.estim * lambda
+                   txt <- paste(txt, "x lambda")
+               }
+               legend.text <- paste(txt, "=", round(par.estim, digits = 3))
+               if(is.null(main)) main <- "Poissoness plot"
+  },
+
+           "binomial" = {
+               if(is.null(size)) {
+                   size <- max(count)
+                   warning("size was not given, taken as maximum count")
+               }
+               par.ml <- suppressWarnings(goodfit(x, type = type, par = list(size = size))$par$prob)
+
+               phi <- function(nk, k, N, size = NULL)
+                   log(nk) - log(N * choose(size, k))
+               y <- phi(myfreq, mycount, sum(freq), size = size)
+               fm <- lm(y ~ mycount)
+               par.estim <- exp(coef(fm)[2])
+               par.estim <- par.estim / (1 + par.estim)
+               names(par.estim) <- "prob"
+               legend.text <- paste("inv.logit(slope) =", round(par.estim, digits = 3))
+               if(is.null(main)) main <- "Binomialness plot"
+           },
+
+           "nbinomial" = {
+               if(is.null(size)) {
+                   par.ml <- suppressWarnings(goodfit(x, type = type)$par)
+                   size <- par.ml$size
+                   par.ml <- par.ml$prob
+               }else{
+                   xbar <- weighted.mean(mycount, myfreq)
+                   par.ml <- size / (size+xbar)
+               }
+               phi <- function(nk, k, N, size = NULL)
+                   log(nk) - log(N * choose(size + k - 1, k))
+               y <- phi(myfreq, mycount, sum(freq), size = size)
+               fm <- lm(y ~ mycount)
+               par.estim <- 1 - exp(coef(fm)[2])
+               names(par.estim) <- "prob"
+               legend.text <- paste("1-exp(slope) =", round(par.estim, digits = 3))
+               if(is.null(main)) main <- "Negative binomialness plot"
+           })
+
+    yhat <- ifelse(myfreq > 1.5, myfreq - 0.67, 1/exp(1))
+    yhat <- phi(yhat, mycount, sum(freq), size = size)
+    if(!is.null(lambda)) yhat <- yhat + lambda - mycount * log(lambda)
+
+    phat <- myfreq / sum(myfreq)
+    ci.width <- qnorm(1-(1 - conf_level)/2) *
+        sqrt(1-phat)/sqrt(myfreq - (0.25 * phat + 0.47)*sqrt(myfreq))
+
+    RVAL <- cbind(count, freq, NA, NA, NA, NA, NA)
+    RVAL[myindex,3:7] <- cbind(y,yhat,ci.width, yhat-ci.width, yhat + ci.width)
+    RVAL <- as.data.frame(RVAL)
+    names(RVAL) <- c("Counts", "Freq", "Metameter", "CI.center",
+                     "CI.width", "CI.lower", "CI.upper")
+    
+
+    x_lim <- range(RVAL[,1])
+    y_line <- predict(fm, newdata = data.frame(mycount = xlim))
+    
+    # Inserted return statement to give just what's needed
+    RVAL$y_line <- y_line
+    return(RVAL)
+
+  }
+```
+
+
+```{r, warning=FALSE, out.height="75%", out.width="75%"}
+# Old function call
+#distplot(as.vector(dataset$index1), type="poisson")
+
+# New function call, takes the same arguments but returns a dataframe with
+# everything needed to make a Poissonness plot
+RVAL <- distplot_hacked(as.vector(dataset$index1), type="poisson")
+
+ggplot(RVAL,aes()) + 
+  geom_line(aes(x=Counts,y=y_line, color="Perfect Poisson distribution"), 
+            size=0.75, key_glyph="point") +
+  geom_point(aes(x=Counts, y=Metameter, color="Observed distribution"),
+             key_glyph="point") +
+  xlab("Count") +
+  ylab("Distribution metameter") +
+  ggtitle("Figure 1: Poissoness Plot of Preferred Index") +
+  labs(color="", position="bottom") +
+  scale_colour_manual(values=c("red", "blue")) +
+  theme_bw() +
+  theme(legend.position="top") +
+  annotate(geom="text",x=1,y=7,label="slope = 1.708\nintercept = -5.441\nlambda = 5.17\nexp(slope) = 5.516",
+           hjust=0) +
+  scale_x_continuous(breaks = 1:8) +
+  scale_y_continuous(breaks = -4:9)
+
+```
+
+I next examine the distribution of the primary dependent variable: the preferred index of individual votes. In order for a Poisson regression on this index to be valid, it needs to follow a Poisson distribution with the key assumption that the count data's mean is equal to its variance. A simple check of this on the preferred index yields a mean of 5.17 and variance of 5.34, which falls 0.07 standard deviations away--a very minor violation of this strict assumption. Figure 1 provides a more visual test of the distribution with a Poissoness plot. **INTERPRET POISSONESS PLOT**
+
+Figure 2 and 3 compare the fit of the data to the Poisson and negative binomial distributions with rootograms **INTERPRET ROOTOGRAMS**
+
+Table 2 compares the results of modeling the data as a Poisson distribution and a negative binomial **INTERPRET MODELS**
+```{r, message=FALSE, eval=FALSE}
+poisson_fit <- goodfit(table(dataset$index1), "poisson")
+negbin_fit <- goodfit(table(dataset$index1), "nbinomial")
+
+#plot(gf, type = "standing", scale = "raw")
+#par(mfrow=c(1,2)) # NOT WORKING
+png(file="Figure2.png")
+plot(poisson_fit, type = "hanging", scale = "sqrt", main="Figure 2: Poisson Rootogram")
+dev.off()
+png(file="Figure3.png")
+plot(negbin_fit, type = "hanging", scale = "sqrt", main="Figure 3: Negative Binomial Rootogram")
+dev.off()
+```
+```{r, out.width="49%", out.height="49%", fig.show='hold', fig.align='center'}
+knitr::include_graphics(c("Figure2.png","Figure3.png"))
+```
+
+
+```{r}
+# Compare Poisson model with negative binomial
+model_nb1 <- glm.nb(index1 ~ sons + dtrs + ageco + agecosq + revoffco
+                     + nslave + dist2 + vsecr + vbank + ddebt + pols + lawyer,
+                     data=dataset)
+
+model_nb2 <- ml.nb2(index1 ~ sons + dtrs + ageco + agecosq + revoffco
+                     + nslave + dist2 + vsecr + vbank + ddebt + pols + lawyer,
+                     data=dataset)
+
+IV_names <- list("(Intercept)"="Constant","sons"="Number of sons","dtrs"="Number of daughters","ageco"="Age",
+         "agecosq"="Age squared","revoffco"="Revolutionary war officer","nslave"="Logged number of slaves",
+         "dist2"="Distance to navigable coastline",
+         "vsecr"="Public securities (1000s, 1787 dollars)",
+         "vbank"="Private securities (1000s, 1787 dollars)",
+         "ddebt"="Debtor (dummy)","pols"="Politician","lawyer"="Lawyer") 
+
+modelsummary(list("Poisson"=model_poisson_R, "Negative Binomial"=model_nb1), stars=T,
+             coef_map=IV_names, fmt=4, caption="Comparison of Poisson and Negative Binomial Models of the Preferred Index")
+
+```
+### Missingness
+
+
+
+
+## References
+
+Pope & Schmidt
+
+https://www.icpsr.umich.edu/web/ICPSR/studies/24544
+
+## Appendix A
+
+```{r}
+var_names <- c('index1',
+                'vote2',
+                'anti5',
+                'anti6',
+                'anti7',
+                'vote8',
+                'vote9',
+                'anti14',
+                'vote15',
+                'sons',
+                'dtrs',
+                'ageco',
+                'agecosq',
+                'revoffco',
+                'nslave',
+                'dist2',
+                'vsecr',
+                'vbank',
+                'ddebt',
+                'pols',
+                'lawyer')
+
+full_names <- c("Preferred Index",
+                "National Veto",
+                "Debtor Legislators",
+                "Cong. Quorum.",
+                "National Exports",
+                "Militia Control",
+                "State Credit",
+                "Navigation Acts",
+                "Military Responsibility",
+                "Number of sons",
+                "Number of daughters",
+                "Age",
+                "Age squared",
+                "Revolutionary war officer",
+                "Logged number of slaves",
+                "Distance to navigable coastline",
+                "Public securities (1000s, 1787 dollars)",
+                "Private securities (1000s, 1787 dollars)",
+                "Debtor (dummy)",
+                "Politician",
+                "Lawyer")                
+
+kable(cbind(var_names, full_names), col.names=c("Variable name","Full name"),
+      caption="Variable Key", booktabs=T)
+      
+```
+
+
+# 1. A histogram of the dependent variable
+```{r, echo=FALSE}
+ggplot(aes(x=index1),data=dataset) +
+  geom_histogram(binwidth = 0.5, col="darkgray", fill="darkblue") +
+  xlab("Preferred Index") +
+  ylab("") +
+  ggtitle("Preferred Vote Index Distribution") +
+  scale_x_continuous(breaks = 1:8) +
+  scale_y_continuous(breaks = 1:10) +
+  theme_bw()
 ```
 
 # 2. A correlation matrix for the DV and IVs that the original authors included in the model you are replicating
 
 ## Correlation Matrix of Model Variables
 ```{r, out.width=1000}
-n <- dataset %>% select(index1, vote2, anti5, anti6, anti7, vote8, vote9, anti14, vote15, sons, dtrs, ageco, agecosq, revoffco,
+n <- dataset %>% dplyr::select(index1, vote2, anti5, anti6, anti7, vote8, vote9, anti14, vote15, sons, dtrs, ageco, agecosq, revoffco,
                      nslave, dist2, vsecr, vbank, ddebt, pols, lawyer)
 m <- cor(n)
 
@@ -123,10 +585,10 @@ Note: `index`, `anti`, and `vote` variables are dependent in the paper, all othe
 
 # 3. A visual or tabular depiction of the missingness in the data from part (2); see p. 251-255 of the text.
 ```{r, warning=FALSE}
-DVs <- dataset %>% select(index1, vote2, anti5, anti6, anti7, vote8,
+DVs <- dataset %>% dplyr::select(index1, vote2, anti5, anti6, anti7, vote8,
                                vote9, anti14, vote15)
 
-IVs <- dataset %>% select(sons, dtrs, ageco, 
+IVs <- dataset %>% dplyr::select(sons, dtrs, ageco, 
                                agecosq, revoffco, nslave, dist2, vsecr, vbank,
                                ddebt, pols, lawyer)
 missmap(DVs, main="Dependent Variable Missingness")
@@ -134,199 +596,296 @@ missmap(IVs, main="Independent Variable Missingness")
 ```
 While there is no missingness visible in the replication dataset, the authors do state that "The second reason for McDonald’s selection of the sixteen key votes is that he claimed there is enough information from Farrand’s Records, delegate diaries, and other sources—to estimate how each individual delegate would have voted on this issue" (Pope and Schmidt 2021, 6). This implies that data is missing but was imputed by the authors. A replication extension could be to determine which data points are imputed and do sensitivity testing without those data.
 
+# Replication
 
+
+
+
+# Model Fit
 ```{r}
-# Code taken from:
-# https://stats.stackexchange.com/questions/89999/
-# how-to-replicate-statas-robust-binomial-glm-for-proportion-data-in-r
-# Creates robust standard errors for glm models
-robustify <- function(model){
-  cov.m1 <- vcovHC(model, type = "HC0")
-  
-  std.err <- sqrt(diag(cov.m1))
-  
-  q.val <- qnorm(0.975)
-  
-  retVal <- cbind(
-    Estimate = coef(model)
-    , "Robust SE" = std.err
-    , z = (coef(model)/std.err)
-    , "Pr(>|z|) "= 2 * pnorm(abs(coef(model_poisson)/std.err), 
-                             lower.tail = FALSE)
-    , LL = coef(model_poisson) - q.val  * std.err
-    , UL = coef(model_poisson) + q.val  * std.err
-  )
-  return(retVal)
-}
+# Function stolen from vcd. Provides just the data needed for a Poissonness plot
+# without actually plotting it which lets you use ggplot or any graphics library
+# you want!
+distplot_hacked <-
+    function(x, type = c("poisson", "binomial", "nbinomial"),
+             size = NULL, lambda = NULL, legend = TRUE, xlim = NULL, ylim = NULL,
+             conf_int = TRUE, conf_level = 0.95, main = NULL,
+             xlab = "Number of occurrences", ylab = "Distribution metameter",
+             gp = gpar(cex = 0.8), lwd=2, gp_conf_int = gpar(lty = 2),
+             name = "distplot", newpage = TRUE,
+             pop = TRUE, return_grob = FALSE, ...)
+{
+    if(is.vector(x)) {
+        x <- table(x)
+    }
+    if(is.table(x)) {
+        if(length(dim(x)) > 1) stop ("x must be a 1-way table")
+        freq <- as.vector(x)
+        count <- as.numeric(names(x))
+    } else {
+        if(!(!is.null(ncol(x)) && ncol(x) == 2))
+            stop("x must be a 2-column matrix or data.frame")
+        freq <- as.vector(x[,1])
+        count <- as.vector(x[,2])
+    }
 
-# Because R and STATA don't get along, this function takes a 
-# sampleSelection::probit model with robust SEs and formats the output to be
-# presented in a neat table since stargazer and modelsummary don't support
-# the model output by sampleSelection
-fmt_col <- function(model, DV){
-  ests <- rep(NA, nrow(model))
-  errs <- rep(NA, nrow(model))
-  
-  for(i in 1:nrow(model)){
-    sig <- ""
-    if(model$p[i] < 0.01){sig <- '***'}
-    else if(model$p[i] < 0.05){sig <- '**'}
-    else if(model$p[i] < 0.1){sig <- '*'}
+    myindex <- (1:length(freq))[freq > 0]
+    mycount <- count[myindex]
+    myfreq <- freq[myindex]
+
+    switch(match.arg(type),
+
+           "poisson" = {
+               par.ml <- suppressWarnings(goodfit(x, type = type)$par$lambda)
+
+               phi <- function(nk, k, N, size = NULL)
+                   ifelse(nk > 0, lgamma(k + 1) + log(nk/N), NA)
+               y <- phi(myfreq, mycount, sum(freq))
+               if(!is.null(lambda)) y <- y + lambda - mycount * log(lambda)
+               fm <- lm(y ~ mycount)
+               par.estim <- exp(coef(fm)[2])
+               names(par.estim) <- "lambda"
+               txt <- "exp(slope)"
+               if(!is.null(lambda)) {
+                   par.estim <- par.estim * lambda
+                   txt <- paste(txt, "x lambda")
+               }
+               legend.text <- paste(txt, "=", round(par.estim, digits = 3))
+               if(is.null(main)) main <- "Poissoness plot"
+  },
+
+           "binomial" = {
+               if(is.null(size)) {
+                   size <- max(count)
+                   warning("size was not given, taken as maximum count")
+               }
+               par.ml <- suppressWarnings(goodfit(x, type = type, par = list(size = size))$par$prob)
+
+               phi <- function(nk, k, N, size = NULL)
+                   log(nk) - log(N * choose(size, k))
+               y <- phi(myfreq, mycount, sum(freq), size = size)
+               fm <- lm(y ~ mycount)
+               par.estim <- exp(coef(fm)[2])
+               par.estim <- par.estim / (1 + par.estim)
+               names(par.estim) <- "prob"
+               legend.text <- paste("inv.logit(slope) =", round(par.estim, digits = 3))
+               if(is.null(main)) main <- "Binomialness plot"
+           },
+
+           "nbinomial" = {
+               if(is.null(size)) {
+                   par.ml <- suppressWarnings(goodfit(x, type = type)$par)
+                   size <- par.ml$size
+                   par.ml <- par.ml$prob
+               }else{
+                   xbar <- weighted.mean(mycount, myfreq)
+                   par.ml <- size / (size+xbar)
+               }
+               phi <- function(nk, k, N, size = NULL)
+                   log(nk) - log(N * choose(size + k - 1, k))
+               y <- phi(myfreq, mycount, sum(freq), size = size)
+               fm <- lm(y ~ mycount)
+               par.estim <- 1 - exp(coef(fm)[2])
+               names(par.estim) <- "prob"
+               legend.text <- paste("1-exp(slope) =", round(par.estim, digits = 3))
+               if(is.null(main)) main <- "Negative binomialness plot"
+           })
+
+    yhat <- ifelse(myfreq > 1.5, myfreq - 0.67, 1/exp(1))
+    yhat <- phi(yhat, mycount, sum(freq), size = size)
+    if(!is.null(lambda)) yhat <- yhat + lambda - mycount * log(lambda)
+
+    phat <- myfreq / sum(myfreq)
+    ci.width <- qnorm(1-(1 - conf_level)/2) *
+        sqrt(1-phat)/sqrt(myfreq - (0.25 * phat + 0.47)*sqrt(myfreq))
+
+    RVAL <- cbind(count, freq, NA, NA, NA, NA, NA)
+    RVAL[myindex,3:7] <- cbind(y,yhat,ci.width, yhat-ci.width, yhat + ci.width)
+    RVAL <- as.data.frame(RVAL)
+    names(RVAL) <- c("Counts", "Freq", "Metameter", "CI.center",
+                     "CI.width", "CI.lower", "CI.upper")
     
-    ests[i] <- paste(model$estimate[i],sig, sep="")
-    errs[i] <- paste("(",model$stderr[i],")",sep="")
+
+    x_lim <- range(RVAL[,1])
+    y_line <- predict(fm, newdata = data.frame(mycount = xlim))
+    
+    # Inserted return statement to give just what's needed
+    RVAL$y_line <- y_line
+    return(RVAL)
+
   }
-  return(c(rbind(ests,errs),toString(length(DV))))
+```
+
+
+```{r}
+# Old function call
+distplot(as.vector(dataset$index1), type="poisson")
+
+# New function call, takes the same arguments but returns a dataframe with
+# everything needed to make a Poissonness plot
+RVAL <- distplot_hacked(as.vector(dataset$index1), type="poisson")
+
+ggplot(RVAL,aes()) + 
+  geom_line(aes(x=Counts,y=y_line), size=0.75, col="blue") +
+  geom_point(aes(x=Counts, y=Metameter)) +
+  theme_bw()
+
+# TODO: Clean up plot, add line info and legend
+```
+
+https://stats.stackexchange.com/questions/419304/computing-different-types-of-negative-binomial-regression
+
+
+
+# Missingness
+```{r, message=FALSE}
+
+pope_names <- c(dataset[['delegates']], NA, NA)
+ICPSR_names <- ICPSR_data$lastname
+
+#cbind(sort(pope_names), sort(ICPSR_names))
+
+DVs_missing <- ICPSR_data %>% dplyr::select(vote2, anti5, anti6, anti7, vote8,
+                               vote9, anti14, vote15)
+
+# Drop the last two delegate observations which Pope and Schmidt omit
+DVs_missing <- DVs_missing[1:53,]
+
+# Still need to calculate index1 for rows without any missing data
+# DO AFTER GETTING AMELIA IMPUTATION FOR INDIVIDUAL VOTES
+
+
+missmap(DVs_missing, main="Dependent Variable Missingness")
+
+dataset_missing <- cbind(dataset %>% dplyr::select(sons, dtrs, age, revoffco, 
+                       nslave, dist1, vsecr, vbank, ddebt, pols, lawyer), 
+                       DVs_missing)
+
+# What it should be!
+# amelia.out <- amelia(dataset_missing %>% dplyr::select(-anti5, -anti6, -anti7, -vote8,
+#                               -vote9, -anti14, -vote15), m=1, cs=12, noms=c(4,9:12))
+
+amelia.out <- amelia(dataset_missing %>% dplyr::select(-anti5, -anti6, -anti7, -vote8,
+                              -vote9, -anti14, -vote15), m=1, cs=c(12))
+
+amelia.out$imputations
+```
+
+Houston: Only has "yea" vote on anti5 vote, died one week into the convention
+ * 5 children: 2 sons, 3 daughters (https://www.wikitree.com/wiki/Houston-1421#:~:text=William%20Churchill%20and%20Jane%20(Smith,Ann%20Houston%20and%20Mary%20Houston.)
+ * https://www.google.com/books/edition/The_Constitutional_Convention_of_1787/oyFpDS8p33sC?hl=en&gbpv=1&dq=william+churchill+houston&pg=PA354&printsec=frontcover didn't specify genders
+ 
+Wythe: Has no recorded votes, no children. Did not attend the votes.
+
+```{r}
+# Set all variables to their median value as baseline for Houston
+Houston_vals <- summarize_all(dataset, median)
+# Put in known biographical details
+Houston_vals$state <- "NJ"
+Houston_vals$delegates <- "Houston"
+Houston_vals$sons <- 2
+Houston_vals$dtrs <- 3
+Houston_vals$total <- 5
+Houston_vals$pctdtr <- 3/5
+Houston_vals$pctson1 <- NA
+Houston_vals$age <- 41
+Houston_vals$ageco <- 41
+Houston_vals$agecosq <- 41^2
+Houston_vals$revoff <- 1
+Houston_vals$revoffco <- 1
+Houston_vals$lawyer <- 1
+Houston_vals$dist2 <- 14 # Imputed floored mean of other NJ delegates
+
+# Attach to the dataset
+dataset_Houston <- rbind(dataset, Houston_vals)
+
+# Get all the possible combinations of votes Houston could have had
+possible_votes <- expand.grid(rep(list(0:1),8))
+colnames(possible_votes) <-  c("vote2", "anti5", "anti6", "anti7", "vote8", 
+                               "vote9", "anti14", "vote15")
+possible_votes$index1 <- NA
+
+# Calculate the index
+for(i in 1:nrow(possible_votes)){
+  possible_votes[i,9] <- sum(possible_votes[i,1:8])
 }
 
 ```
 
-```{r, warning=FALSE}
+```{r}
+coeffs <- c()
+errs <- c()
+for(i in 1:nrow(possible_votes)){
+  
+  data <- dataset_Houston
+  
+  data[54,c(49,65,66,67,55,56,68,62,74)] <- possible_votes[i,]
+  
+  mod <- glm(index1 ~ sons + dtrs + ageco + agecosq + revoffco
+             + nslave + dist2 + vsecr + vbank + ddebt + pols + lawyer,
+             data=data, family = poisson(link = "log"))
+  
+  coeffs <- c(coeffs, summary(mod)$coefficients[2,1])
+  errs <- c(errs, summary(mod)$coefficients[2,2])
+}
 
-model_poisson <- glm(index1 ~ sons + dtrs + ageco + agecosq + revoffco
-                     + nslave + dist2 + vsecr + vbank + ddebt + pols + lawyer,
-                     data=dataset, family = poisson(link = "log"))
+# TODO: CLEAN UP
+ggplot(data.frame(coeffs),aes(x=coeffs)) +
+  geom_histogram()
 
-# Generate the model with robust SEs and get it into a workable type
-model_poisson <- as.data.frame(matrix(round(robustify(glm(index1 ~ sons + dtrs + ageco + agecosq + revoffco + nslave + dist2 + vsecr + vbank + ddebt + pols + lawyer, data=dataset,
-                     family = poisson(link = "log")))[,1:4],4), ncol=4))
-colnames(model_poisson) <- c("estimate", "stderr", "t", "p") # TODO: WHY IS THIS BUGGY?
-
-# Format the model output so it's ready for the table
-pn <- fmt_col(model_poisson, dataset$index1)
-
-# model_probit1 <- glm(vote2 ~ sons + dtrs + ageco + agecosq +
-#                     revoffco + nslave + dist2 + vsecr + vbank +
-#                     ddebt + pols + lawyer,
-#                     data=dataset, family=binomial(link="probit"))
-
-model_probit1 <- as.data.frame(matrix(round(coeftest(probit(vote2 ~ sons + dtrs + ageco + agecosq + 
-                    revoffco + nslave + dist2 + vsecr + vbank + 
-                    ddebt + pols + lawyer,
-                    data=dataset), vcovCL),4), ncol=4))
-colnames(model_probit1) <- c("estimate", "stderr", "t", "p")
-
-p1 <- fmt_col(model_probit1, dataset$vote2)
-
-# model_probit2 <- glm(anti5 ~ sons + dtrs + ageco + agecosq +
-#                     revoffco + nslave + dist2 + vsecr + vbank +
-#                     ddebt + pols + lawyer,
-#                     data=dataset, family=binomial(link="probit"))
-
-model_probit2 <- as.data.frame(matrix(round(coeftest(probit(anti5 ~ sons + dtrs + ageco + agecosq + 
-                    revoffco + nslave + dist2 + vsecr + vbank + 
-                    ddebt + pols + lawyer,
-                    data=dataset), vcovCL),4), ncol=4))
-colnames(model_probit2) <- c("estimate", "stderr", "t", "p")
-
-p2 <- fmt_col(model_probit2, dataset$anti5)
-
-# model_probit3 <- glm(anti6 ~ sons + dtrs + ageco + agecosq + 
-#                     revoffco + nslave + dist2 + vsecr + vbank + 
-#                     ddebt + pols + lawyer,
-#                     data=dataset, family=binomial(link="probit"))
-
-model_probit3 <- as.data.frame(matrix(round(coeftest(probit(anti6 ~ sons + dtrs + ageco + agecosq + 
-                    revoffco + nslave + dist2 + vsecr + vbank + 
-                    ddebt + pols + lawyer,
-                    data=dataset), vcovCL),4), ncol=4))
-colnames(model_probit3) <- c("estimate", "stderr", "t", "p")
-
-p3 <- fmt_col(model_probit3, dataset$anti6)
-
-# model_probit4 <- glm(anti7 ~ sons + dtrs + ageco + agecosq +
-#                     revoffco + nslave + dist2 + vsecr + vbank +
-#                     pols + lawyer,
-#                     data=dataset, family=binomial(link="probit"))
-
-model_probit4 <- as.data.frame(matrix(round(coeftest(probit(anti7 ~ sons + dtrs + ageco + agecosq + 
-                    revoffco + nslave + dist2 + vsecr + vbank +
-                    pols + lawyer,
-                    data=dataset), vcovCL),4), ncol=4))
-colnames(model_probit4) <- c("estimate", "stderr", "t", "p")
-
-p4 <- fmt_col(model_probit4, dataset$anti7)
-p4 <- append(p4, c("-","-"),20) # TODO: WHY DOESN'T THIS MATCH?
-
-# model_probit5 <- glm(vote8 ~ sons + dtrs + ageco + agecosq + 
-#                     revoffco + nslave + dist2 + vsecr + vbank + 
-#                     ddebt + pols + lawyer,
-#                     data=dataset, family=binomial(link="probit"))
-
-model_probit5 <- as.data.frame(matrix(round(coeftest(probit(vote8 ~ sons + dtrs + ageco + agecosq + 
-                    revoffco + nslave + dist2 + vsecr + vbank + 
-                    ddebt + pols + lawyer,
-                    data=dataset), vcovCL),4), ncol=4))
-colnames(model_probit5) <- c("estimate", "stderr", "t", "p")
-
-p5 <- fmt_col(model_probit5, dataset$vote8)
-
-# model_probit6 <- glm(vote9 ~ sons + dtrs + ageco + agecosq + 
-#                     revoffco + nslave + dist2 + vsecr + 
-#                     ddebt + pols + lawyer,
-#                     data=dataset, family=binomial(link="probit"))
-
-model_probit6 <- as.data.frame(matrix(round(coeftest(probit(vote9 ~ sons + dtrs + ageco + agecosq + 
-                    revoffco + nslave + dist2 + vsecr + 
-                    ddebt + pols + lawyer,
-                    data=dataset), vcovCL),4), ncol=4))
-colnames(model_probit6) <- c("estimate", "stderr", "t", "p")
-
-p6 <- fmt_col(model_probit6, dataset$vote9)
-p6 <- append(p6, c("-","-"),18) # TODO: WHY DOESN'T THIS MATCH?
-
-# model_probit7 <- glm(anti14 ~ sons + dtrs + ageco + agecosq + 
-#                     revoffco + nslave + dist2 + vsecr + vbank + 
-#                     ddebt + pols + lawyer,
-#                     data=dataset, family=binomial(link="probit"))
-
-model_probit7 <- as.data.frame(matrix(round(coeftest(probit(anti14 ~ sons + dtrs + ageco + agecosq + 
-                    revoffco + nslave + dist2 + vsecr + vbank + 
-                    ddebt + pols + lawyer,
-                    data=dataset), vcovCL),4), ncol=4))
-colnames(model_probit7) <- c("estimate", "stderr", "t", "p")
-
-p7 <- fmt_col(model_probit7, dataset$anti14)
-
-# model_probit8 <- glm(vote15 ~ sons + dtrs + ageco + agecosq + 
-#                     revoffco + nslave + dist2 + vsecr + vbank + 
-#                     ddebt + pols + lawyer,
-#                     data=dataset, family=binomial(link="probit"))
-
-model_probit8 <- as.data.frame(matrix(round(coeftest(probit(vote15 ~ sons + dtrs + ageco + agecosq + 
-                    revoffco + nslave + dist2 + vsecr + vbank + 
-                    ddebt + pols + lawyer,
-                    data=dataset), vcovCL),4), ncol=4))
-colnames(model_probit8) <- c("estimate", "stderr", "t", "p")
-
-p8 <- fmt_col(model_probit8, dataset$vote15)
-
-# Column names for Table 2
-cnames=c("Preferred Index","National Veto","Debtor Legislators","Cong. Quorum.",
-           "National Exports","Militia Control","State Credit",
-           "Navigation Acts","Military Responsibility")
-
-# Row names for Table 2 (with ugly hack to get spacing right)
-rnames=c("Constant","","Number of sons"," ","Number of daughters","  ","Age",
-         "   ","Age squared","    ",
-         "Revolutionary war officer","     ","Logged number of slaves","      ", 
-         "Distance to navigable coastline","       ",
-         "Public securities (1000s, 1787 dollars)","        ",
-         "Private securities (1000s, 1787 dollars)","         ",
-         "Debtor (dummy)","          ", "Politician","           ", "Lawyer",
-         "             ", "Observations") 
-
-# Assemble the dataframe with the model outputs and assign names
-table2 <- as.data.frame(cbind(pn,p1, p2, p3, p4, p5, p6, p7, p8))
-colnames(table2) <- cnames
-rownames(table2) <- rnames
+ggplot(data.frame(errs),aes(x=errs)) +
+  geom_histogram()
 ```
 
+
+
+# Bootstrapping
+
 ```{r}
-# Generate Table 2
-kable(table2, booktabs=T) %>% 
-  kable_styling(latex_options="scale_down") %>% 
-  landscape() 
+boot.poisson <- function(data, indices, maxit=20){
+  data <- data[indices,]
+  model <- glm(index1 ~ sons + dtrs + ageco + agecosq + revoffco
+                     + nslave + dist2 + vsecr + vbank + ddebt + pols + lawyer,
+                     data=data, family = poisson(link = "log"))
+  #return(sqrt(diag(vcov(model))))
+  return(model$coefficients)
+}
+
+boot.probit <- function(data, indices, formula, maxit=20){
+  data <- data[indices,]
+  model <- glm(formula, data=data, family=binomial(link="probit"))
+  #return(sqrt(diag(vcov(model))))
+  return(model$coefficients)
+}
+
+poisson_boot <- boot(dataset, boot.poisson, 1999, maxit=100)
+
+SE_poisson_R <- summary(model_poisson_R)$coefficients[,2]
+SE_poisson_robust <- robustify(model_list[[1]])[,2]
+SE_poisson_boot <- summary(poisson_boot)$bootSE
+
+# # FIGURE OUT WHY THIS ISN'T WORKING
+# probit1_boot <- boot(dataset, boot.probit, 1999, maxit=1000,
+#                      formula=as.formula("anti5 ~ sons + dtrs + ageco + agecosq +
+#                     revoffco + nslave + dist2 + vsecr + vbank +
+#                     ddebt + pols + lawyer"))
+
+# SE_probit1_R <- summary(model_probit1_R)$coefficients[,2]
+# SE_probit1_robust <- model_probit1[,2]
+# SE_probit1_boot <- summary(poisson_boot)$bootSE
+
+var_names <- c("Constant","Number of sons","Number of daughters","Age",
+         "Age squared","Revolutionary war officer","Logged number of slaves",
+         "Distance to navigable coastline",
+         "Public securities (1000s, 1787 dollars)",
+         "Private securities (1000s, 1787 dollars)",
+         "Debtor (dummy)","Politician","Lawyer")
+
+SEs_poisson <- data.frame(round(cbind(SE_poisson_R, SE_poisson_robust, SE_poisson_boot),3))
+colnames(SEs_poisson) <- c("R SE", "Robust SE", "Boostrapped SE")
+rownames(SEs_poisson) <- var_names 
+
+kable(SEs_poisson, booktabs=T)
 ```
 
 
