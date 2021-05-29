@@ -14,6 +14,7 @@ probit vote2 sons dtrs ageco agecosq revoffco nslave dist2 vsecr vbank ddebt pol
 probit anti5 sons dtrs ageco agecosq revoffco nslave dist2 vsecr vbank ddebt pols lawyer,r 
 probit anti6 sons dtrs ageco agecosq revoffco nslave dist2 vsecr vbank ddebt pols lawyer,r 
 probit anti7 sons dtrs ageco agecosq revoffco nslave dist2 vsecr vbank ddebt pols lawyer,r 
+display e(anti7)
 probit vote8 sons dtrs ageco agecosq revoffco nslave dist2 vsecr vbank ddebt pols lawyer,r 
 probit vote9 sons dtrs ageco agecosq revoffco nslave dist2 vsecr vbank ddebt pols lawyer,r  
 probit anti14 sons dtrs ageco agecosq revoffco nslave dist2 vsecr vbank ddebt pols lawyer,r 
