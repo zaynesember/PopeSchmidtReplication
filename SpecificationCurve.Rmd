@@ -26,7 +26,70 @@ Full replication at: https://github.com/zaynesember/PopeSchmidtReplication
 
 The specification curves presented here come from Jeremy C. Pope and Soren J. Schmidt's 2021 piece "Father Founders: Did Child Gender Affect Voting at the Constitutional Convention?". In it, they test the hypothesis that the delegates with sons would tend to vote for a stronger national government because they foresaw such a government providing greater opportunities for their sons--for which they find evidence. I present a specification curve analysis for two of their models which both contain a variety of controls: their primary Poisson regression model which uses a "preferred index" that tallies votes in favor of expansion of the national government as the dependent variable and a probit model using a single vote on whether to allow those in debt to the national government to serve as legislators.
 
-```{r, eval=FALSE, include=FALSE}
+```{r, out.width="70%", out.height="70%", fig.show='hold', fig.align='center', echo=FALSE}
+knitr::include_graphics("speccurve1.png")
+```
+
+```{r, out.width="70%", out.height="70%", fig.show='hold', fig.align='center', echo=FALSE}
+knitr::include_graphics("speccurve2.png")
+```
+
+Both models appear sensitive to which controls are included, showing a significant result for the number sons only when most of the controls are included. 
+
+```{r, fig.show='hold', echo=FALSE}
+var_names <- c('index1',
+                'vote2',
+                'anti5',
+                'anti6',
+                'anti7',
+                'vote8',
+                'vote9',
+                'anti14',
+                'vote15',
+                'sons',
+                'dtrs',
+                'ageco',
+                'agecosq',
+                'revoffco',
+                'nslave',
+                'dist2',
+                'vsecr',
+                'vbank',
+                'ddebt',
+                'pols',
+                'lawyer')
+
+full_names <- c("Preferred Index",
+                "National Veto",
+                "Debtor Legislators",
+                "Cong. Quorum.",
+                "National Exports",
+                "Militia Control",
+                "State Credit",
+                "Navigation Acts",
+                "Military Responsibility",
+                "Number of sons",
+                "Number of daughters",
+                "Age",
+                "Age squared",
+                "Revolutionary war officer",
+                "Logged number of slaves",
+                "Distance to navigable coastline",
+                "Public securities (1000s, 1787 dollars)",
+                "Private securities (1000s, 1787 dollars)",
+                "Debtor (dummy)",
+                "Politician",
+                "Lawyer")                
+
+kable(cbind(var_names, full_names), col.names=c("Variable name","Full name"),
+      caption="Variable Key", booktabs=T) %>%
+  kable_styling(latex_options = "hold_position")
+      
+```
+
+## Code
+
+```{r, eval=FALSE, include=TRUE}
 # CODE FROM GARETH NELLIS
 # declare controls      
   controls <- 
@@ -93,24 +156,13 @@ The specification curves presented here come from Jeremy C. Pope and Soren J. Sc
       scale_color_manual(values = c("lightblue")) +
       labs(x = "Specification number", y = "") + 
       theme_bw()  
-  
-# stack them
-  # spec_curve2 <- plot_grid(
-  #   p1, p2, 
-  #   labels = c("A", "B"), 
-  #   align = "v", 
-  #   axis = "rbl", 
-  #   rel_heights = c(2, 3), 
-  #   ncol = 1)  
 
 ggsave(file="speccurve1.png", arrangeGrob(p1, p2, nrow=2))
 ```
 
-```{r, out.width="70%", out.height="70%", fig.show='hold', fig.align='center', echo=FALSE}
-knitr::include_graphics("speccurve1.png")
-```
 
-```{r, eval=FALSE, include=FALSE}
+
+```{r, eval=FALSE, include=TRUE}
 # CODE FROM GARETH NELLIS
 # declare controls      
   controls <- 
@@ -178,70 +230,6 @@ knitr::include_graphics("speccurve1.png")
       labs(x = "Specification number", y = "") + 
       theme_bw()  
   
-# stack them
-  # plot_grid(
-  #   p1, p2, 
-  #   labels = c("A", "B"), 
-  #   align = "v", 
-  #   axis = "rbl", 
-  #   rel_heights = c(2, 3), 
-  #   ncol = 1)  
-  
 ggsave(file="speccurve2.png", arrangeGrob(p1, p2, nrow=2))
 ```
-```{r, out.width="70%", out.height="70%", fig.show='hold', fig.align='center', echo=FALSE}
-knitr::include_graphics("speccurve20.png")
-```
 
-Both models appear sensitive to which controls are included, showing a significant result for the number sons only when most of the controls are included. 
-
-```{r, fig.show='hold', echo=FALSE}
-var_names <- c('index1',
-                'vote2',
-                'anti5',
-                'anti6',
-                'anti7',
-                'vote8',
-                'vote9',
-                'anti14',
-                'vote15',
-                'sons',
-                'dtrs',
-                'ageco',
-                'agecosq',
-                'revoffco',
-                'nslave',
-                'dist2',
-                'vsecr',
-                'vbank',
-                'ddebt',
-                'pols',
-                'lawyer')
-
-full_names <- c("Preferred Index",
-                "National Veto",
-                "Debtor Legislators",
-                "Cong. Quorum.",
-                "National Exports",
-                "Militia Control",
-                "State Credit",
-                "Navigation Acts",
-                "Military Responsibility",
-                "Number of sons",
-                "Number of daughters",
-                "Age",
-                "Age squared",
-                "Revolutionary war officer",
-                "Logged number of slaves",
-                "Distance to navigable coastline",
-                "Public securities (1000s, 1787 dollars)",
-                "Private securities (1000s, 1787 dollars)",
-                "Debtor (dummy)",
-                "Politician",
-                "Lawyer")                
-
-kable(cbind(var_names, full_names), col.names=c("Variable name","Full name"),
-      caption="Variable Key", booktabs=T) %>%
-  kable_styling(latex_options = "hold_position")
-      
-```
